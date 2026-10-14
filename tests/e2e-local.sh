@@ -68,11 +68,22 @@ targets() {
 }
 fingerprint() { targets | while read -r f; do [ -f "$f" ] && shasum -a 256 "$f"; done; }
 
-has_base=$(php -r '$l = json_decode(file_get_contents("composer.lock"), true);
-    foreach (array_merge($l["packages"], $l["packages-dev"] ?? []) as $p) if ($p["name"] === "magento/magento2-base") { echo 1; exit; } echo 0;')
+vendor=$(php -r '$l = json_decode(file_get_contents("composer.lock"), true);
+    foreach (array_merge($l["packages"], $l["packages-dev"] ?? []) as $p) {
+        if ($p["name"] === "magento/magento2-base") { echo "magento"; exit; }
+        if ($p["name"] === "mage-os/magento2-base") { $mageOs = true; }
+    }
+    echo empty($mageOs) ? "" : "mage-os";')
+[ -n "$vendor" ] || { echo "neither magento/magento2-base nor mage-os/magento2-base is installed" >&2; exit 2; }
 
-if [ "$has_base" = 0 ]; then
-    echo "no magento/magento2-base: the plugin must do nothing"
+# Adobe's patches target magento/* packages, so on Mage-OS the security package must leave the store alone.
+expect="${E2E_EXPECT:-auto}"
+if [ "$expect" = auto ]; then
+    [ "$vendor" = mage-os ] && [ "$PATCHES_PACKAGE" = disrex/magento-security-patches ] && expect=none || expect=patches
+fi
+
+if [ "$expect" = none ]; then
+    echo "$vendor store with $PATCHES_PACKAGE: the plugin must do nothing"
     check "no target applies" "$(targets | wc -l | tr -d ' ')" 0
     composer magento-patches:verify >/dev/null 2>&1
     check "verify exits 0" "$?" 0
@@ -103,7 +114,7 @@ if [ -f vendor/bin/patch-status ]; then
     check "Adobe's patch-status lists nothing missing" "$missing" 0
 fi
 
-composer reinstall --no-plugins magento/framework magento/magento2-base >/dev/null 2>&1
+composer reinstall --no-plugins "$vendor/framework" "$vendor/magento2-base" >/dev/null 2>&1
 composer magento-patches:verify >/dev/null 2>&1
 check "verify exits 1 after the core packages were reinstalled" "$?" 1
 if [ "$HEAL" = apply ]; then

@@ -35,7 +35,7 @@ Exit codes: 0 all in place, 1 missing, 2 conflict, 3 configuration error. Run `v
 
 ## Requirements
 
-Magento 2.4.4 or later, PHP 7.4 to 8.5, Composer 2.2 or later, and `git` on the PATH.
+Magento 2.4.4 or later or Mage-OS 1.0 or later, PHP 7.4 to 8.5, Composer 2.2 or later, and `git` on the PATH. CI runs the end-to-end check on Magento 2.4.6-p15 to 2.4.9 and Mage-OS 1.3.1, 2.3.0 and 3.6.0.
 
 ## Development
 

@@ -7,7 +7,7 @@ nav_order: 2
 
 ## Requirements
 
-- Magento Open Source or Adobe Commerce 2.4.4 or later
+- Magento Open Source or Adobe Commerce 2.4.4 or later, or Mage-OS 1.0 or later
 - PHP 7.4 to 8.5
 - Composer 2.2 or later
 - `git` on the PATH, also on the servers that run `composer install`

@@ -8,7 +8,7 @@ declare(strict_types=1);
 //   php tests/e2e-fixture.php <magento-project-dir> <output-dir>
 
 [$self, $project, $output] = $argv + [null, null, null];
-if ($project === null || $output === null || !is_dir($project . '/vendor/magento/framework')) {
+if ($project === null || $output === null || !is_file($project . '/composer.lock')) {
     fwrite(STDERR, "usage: php tests/e2e-fixture.php <magento-project-dir> <output-dir>\n");
     exit(2);
 }
@@ -19,9 +19,16 @@ foreach ($lock['packages'] as $package) {
     $versions[$package['name']] = $package['version'];
 }
 
-$base = $versions['magento/magento2-base'];
-$escaper = 'vendor/magento/framework/Escaper.php';
-$template = 'vendor/magento/module-email/Model/AbstractTemplate.php';
+$vendor = isset($versions['magento/magento2-base']) ? 'magento' : (isset($versions['mage-os/magento2-base']) ? 'mage-os' : null);
+if ($vendor === null) {
+    fwrite(STDERR, "neither magento/magento2-base nor mage-os/magento2-base is installed\n");
+    exit(2);
+}
+
+$basePackage = $vendor . '/magento2-base';
+$base = $versions[$basePackage];
+$escaper = 'vendor/' . $vendor . '/framework/Escaper.php';
+$template = 'vendor/' . $vendor . '/module-email/Model/AbstractTemplate.php';
 $escaperText = (string) file_get_contents($project . '/' . $escaper);
 $july = $escaperText . "// e2e july\n";
 $august = $escaperText . "// e2e august\n";
@@ -36,17 +43,17 @@ file_put_contents($output . '/composer.json', json_encode([
     'name' => 'disrex/e2e-fixture-patches',
     'extra' => ['magento-patches' => [
         'patches' => [
-            ['id' => 'E2E-ROOT', 'source' => 'root.diff', 'base' => ['magento/magento2-base' => $base]],
-            ['id' => 'E2E-MODULE', 'source' => 'module.diff', 'base' => ['magento/framework' => '*']],
+            ['id' => 'E2E-ROOT', 'source' => 'root.diff', 'base' => [$basePackage => $base]],
+            ['id' => 'E2E-MODULE', 'source' => 'module.diff', 'base' => [$vendor . '/framework' => '*']],
         ],
-        'lines' => [$base => ['base' => ['magento/magento2-base' => $base], 'cumulative' => true, 'patches' => [
+        'lines' => [$base => ['base' => [$basePackage => $base], 'cumulative' => true, 'patches' => [
             ['id' => 'E2E-07', 'source' => 'line/july.diff'],
             ['id' => 'E2E-08', 'source' => 'line/august.diff'],
         ]]],
     ]],
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
-echo "fixture for magento/magento2-base $base in $output\n";
+echo "fixture for $basePackage $base in $output\n";
 
 function diff(string $path, ?string $old, ?string $new, bool $executable = false): string
 {

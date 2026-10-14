@@ -32,6 +32,7 @@ check() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (expected $3, got $2
 [ -d "$PROJECT/vendor" ] || { echo "no vendor/ in $PROJECT" >&2; exit 2; }
 [ -d "$PATCHES_DIR" ] || { echo "no patch package at $PATCHES_DIR" >&2; exit 2; }
 
+mkdir -p "$WORK" || exit 2
 copy="$WORK/$(basename "$PROJECT")-$(date +%s)"
 echo "copy: $copy"
 # APFS clones on macOS make a 5 GB project copy instant and nearly free.

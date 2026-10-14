@@ -44,7 +44,7 @@ jobs:
           composer config --no-plugins repositories.0 composer https://mirror.mage-os.org/
           composer remove --no-plugins --no-update magento/composer-dependency-version-audit-plugin || true
           composer config --no-plugins allow-plugins true
-          composer install --no-dev --no-interaction --no-progress --ignore-platform-reqs
+          composer install --no-dev --no-interaction --no-progress --ignore-platform-reqs --no-security-blocking
       - name: Build a patch package from the installed files
         run: php tests/e2e-fixture.php "$SHOP" "${{ runner.temp }}/fixture"
       - name: Patch, verify, revert and heal
@@ -53,4 +53,5 @@ jobs:
           PATCHES_PACKAGE: disrex/e2e-fixture-patches
           PATCHES_VERSION: 1.0.0
           E2E_WORK: ${{ runner.temp }}/work
+          E2E_COMPOSER_FLAGS: --ignore-platform-reqs --no-security-blocking
         run: tests/e2e-local.sh "$SHOP"

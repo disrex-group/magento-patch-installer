@@ -12,7 +12,7 @@ composer config --json extra.magento-patches.trust '["disrex/*"]'
 composer require disrex/magento-security-patches
 ```
 
-Without the `allow-plugins` line a CI run skips the plugin without a word and exits 0 on an unpatched store. Without `trust` the run fails and names the package.
+You only require the patch package; this installer comes with it as a dependency. The `allow-plugins` line names the installer because it is the plugin Composer has to trust. Without that line a CI run skips the plugin without a word and exits 0 on an unpatched store. Without `trust` the run fails and names the package.
 
 ## Use
 

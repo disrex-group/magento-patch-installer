@@ -26,7 +26,7 @@ Then tell it which packages may patch your project. Nothing outside your own `co
 composer config --json extra.magento-patches.trust '["disrex/*"]'
 ```
 
-Then require a patch package. The installer comes with it:
+Then require a patch package. The installer is one of its dependencies, so you never require or update it yourself; the `allow-plugins` line above only gives Composer permission to run it:
 
 ```bash
 composer require disrex/magento-security-patches

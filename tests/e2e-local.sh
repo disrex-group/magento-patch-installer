@@ -28,6 +28,7 @@ failures=0
 pass() { printf '  \033[32mok\033[0m    %s\n' "$1"; }
 fail() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; failures=$((failures + 1)); }
 check() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (expected $3, got $2)"; fi; }
+show_log() { [ "$2" = 0 ] || { echo "    --- last lines of $1:"; tail -25 "$1" | sed "s/^/    /"; }; }
 
 [ -d "$PROJECT/vendor" ] || { echo "no vendor/ in $PROJECT" >&2; exit 2; }
 [ -d "$PATCHES_DIR" ] || { echo "no patch package at $PATCHES_DIR" >&2; exit 2; }
@@ -56,7 +57,9 @@ composer require --no-plugins --no-update "$PATCHES_PACKAGE:$PATCHES_VERSION" "d
 echo "composer update (log: $copy/e2e-update.log)"
 # shellcheck disable=SC2086
 composer update $old "$PATCHES_PACKAGE" disrex/magento-patch-installer $COMPOSER_FLAGS >e2e-update.log 2>&1
-check "composer update exits 0" "$?" 0
+code=$?
+check "composer update exits 0" "$code" 0
+show_log e2e-update.log "$code"
 
 status_json() { composer magento-patches:status --json 2>/dev/null; }
 targets() {
@@ -109,7 +112,9 @@ if [ "$HEAL" = apply ]; then
 else
     # shellcheck disable=SC2086
     composer install $COMPOSER_FLAGS >e2e-heal.log 2>&1
-    check "the next composer install exits 0" "$?" 0
+    code=$?
+    check "the next composer install exits 0" "$code" 0
+    show_log e2e-heal.log "$code"
 fi
 composer magento-patches:verify >/dev/null 2>&1
 check "verify exits 0 after healing" "$?" 0

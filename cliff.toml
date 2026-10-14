@@ -46,7 +46,7 @@ body = """
 {% if not commit.scope -%}
 {{ self::print_commit(commit=commit) }}
 {% endif -%}
-{% endfor %}
+{% endfor -%}
 {% endfor -%}
 """
 footer = ""

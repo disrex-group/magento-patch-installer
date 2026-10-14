@@ -1,0 +1,56 @@
+name: E2E
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  magento:
+    name: Magento ${{ matrix.magento }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { magento: 2.4.6-p15, php: '8.2' }
+          - { magento: 2.4.7-p10, php: '8.3' }
+          - { magento: 2.4.8-p5, php: '8.4' }
+          - { magento: 2.4.9, php: '8.4' }
+    env:
+      SHOP: ${{ github.workspace }}/../shop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      # The Mage-OS mirror serves Adobe's own magento/* packages without repo.magento.com keys.
+      - name: Install Magento ${{ matrix.magento }} from the Mage-OS mirror
+        run: |
+          composer create-project --no-install --no-interaction --repository-url=https://mirror.mage-os.org/ "magento/project-community-edition=${{ matrix.magento }}" "$SHOP"
+          cd "$SHOP"
+          composer config --no-plugins repositories.0 composer https://mirror.mage-os.org/
+          composer remove --no-plugins --no-update magento/composer-dependency-version-audit-plugin || true
+          composer config --no-plugins allow-plugins true
+          composer install --no-dev --no-interaction --no-progress --ignore-platform-reqs
+      - name: Build a patch package from the installed files
+        run: php tests/e2e-fixture.php "$SHOP" "${{ runner.temp }}/fixture"
+      - name: Patch, verify, revert and heal
+        env:
+          PATCHES_DIR: ${{ runner.temp }}/fixture
+          PATCHES_PACKAGE: disrex/e2e-fixture-patches
+          PATCHES_VERSION: 1.0.0
+          E2E_WORK: ${{ runner.temp }}/work
+        run: tests/e2e-local.sh "$SHOP"

@@ -1,0 +1,61 @@
+{
+    "name": "disrex/magento-patch-installer",
+    "description": "Applies Magento 2 / Adobe Commerce security patches, verifies they stay applied, and fails loudly when they do not",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "keywords": [
+        "magento",
+        "magento2",
+        "adobe-commerce",
+        "composer-plugin",
+        "patches",
+        "security"
+    ],
+    "authors": [
+        {
+            "name": "Disrex",
+            "email": "support@disrex.nl",
+            "homepage": "https://disrex.nl"
+        }
+    ],
+    "homepage": "https://github.com/disrex-group/magento-patch-installer",
+    "support": {
+        "issues": "https://github.com/disrex-group/magento-patch-installer/issues",
+        "source": "https://github.com/disrex-group/magento-patch-installer",
+        "security": "https://github.com/disrex-group/magento-patch-installer/security/policy",
+        "email": "support@disrex.nl"
+    },
+    "require": {
+        "php": ">=7.4",
+        "composer-plugin-api": "^2.0"
+    },
+    "require-dev": {
+        "composer/composer": "^2.2",
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^9.6 || ^10.5 || ^11.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Disrex\\MagentoPatchInstaller\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Disrex\\MagentoPatchInstaller\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "class": "Disrex\\MagentoPatchInstaller\\Plugin",
+        "branch-alias": {
+            "dev-master": "0.1.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "lint": "find src tests -name \"*.php\" -print0 | xargs -0 -n1 php -l",
+        "analyse": "phpstan analyse --no-progress",
+        "test": "phpunit"
+    }
+}

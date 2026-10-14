@@ -1,0 +1,32 @@
+name: Refresh end-of-life dates
+
+on:
+  schedule:
+    - cron: '17 6 1 * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - run: bin/refresh-eol
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: refresh-eol
+          commit-message: 'chore(eol): refresh end-of-life dates from magento.watch'
+          title: 'chore(eol): refresh end-of-life dates'
+          body: '`bin/refresh-eol` found changed dates on magento.watch.'
+          delete-branch: true

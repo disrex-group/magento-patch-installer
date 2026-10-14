@@ -1,0 +1,79 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Rebuilds resources/magento-eol.json from magento.watch. The plugin itself never goes online.
+//
+//   bin/refresh-eol           write the file when a date changed
+//   bin/refresh-eol --check   exit 1 when the file is out of date, write nothing
+
+const SOURCE = 'https://magento.watch';
+
+const PRODUCTS = [
+    'magento/product-community-edition' => 'magento-community',
+    'magento/product-enterprise-edition' => 'magento-commerce',
+    'mage-os/product-community-edition' => 'mage-os',
+];
+
+$file = dirname(__DIR__) . '/resources/magento-eol.json';
+$check = in_array('--check', $argv, true);
+$distributions = [];
+
+foreach (PRODUCTS as $package => $slug) {
+    $dates = [];
+
+    foreach (versions(SOURCE . '/api/v1/' . $slug . '/versions') as $version => $release) {
+        if (is_array($release) && is_string($release['eolDate'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $release['eolDate']) === 1) {
+            $dates[(string) $version] = $release['eolDate'];
+        }
+    }
+
+    uksort($dates, 'version_compare');
+    $distributions[$package] = $dates;
+    fwrite(STDERR, sprintf("%-38s %3d versions with a date\n", $package, count($dates)));
+}
+
+$old = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
+
+if (is_array($old) && ($old['distributions'] ?? null) === $distributions) {
+    fwrite(STDERR, "unchanged\n");
+    exit(0);
+}
+
+if ($check) {
+    fwrite(STDERR, "resources/magento-eol.json is out of date; run bin/refresh-eol\n");
+    exit(1);
+}
+
+$json = json_encode(['source' => SOURCE, 'generated' => gmdate('Y-m-d'), 'distributions' => $distributions], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+file_put_contents($file, $json . "\n");
+fwrite(STDERR, "wrote resources/magento-eol.json\n");
+
+/**
+ * @return array<string, mixed>
+ */
+function versions(string $url): array
+{
+    $handle = curl_init($url);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_USERAGENT => 'disrex/magento-patch-installer refresh-eol',
+    ]);
+    $body = curl_exec($handle);
+    $status = curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+
+    $data = $status === 200 && is_string($body) ? json_decode($body, true) : null;
+    if (!is_array($data) || !is_array($data['data'] ?? null)) {
+        fail(sprintf('%s answered HTTP %d without the expected data', $url, $status));
+    }
+
+    return $data['data'];
+}
+
+function fail(string $message): never
+{
+    fwrite(STDERR, 'refresh-eol: ' . $message . "\n");
+    exit(1);
+}

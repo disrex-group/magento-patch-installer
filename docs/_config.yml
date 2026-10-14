@@ -1,0 +1,11 @@
+title: Magento Patch Installer
+description: Applies Magento security patches with Composer, checks they stay applied, and fails the build when one is missing.
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+plugins:
+  - jekyll-remote-theme
+color_scheme: light
+search_enabled: true
+aux_links:
+  GitHub: https://github.com/disrex-group/magento-patch-installer
+  Packagist: https://packagist.org/packages/disrex/magento-patch-installer
+footer_content: 'MIT licensed. Built by <a href="https://disrex.nl">Disrex</a>.'

@@ -1,0 +1,102 @@
+# git-cliff config for disrex/magento-patch-installer, after the Light packages' template
+# (magerexlight app/code/Mrx/*/cliff.toml). Release: `git cliff --tag X.Y.Z -o CHANGELOG.md`, commit, tag X.Y.Z.
+#
+# A <REPO> postprocessor and no [remote.github]: [remote.github] makes git-cliff call the GitHub API on every run,
+# which needs a token and a network. The postprocessor works offline.
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+header = """
+# Disrex Changelog\n
+Simplifying Ecommerce & Hosting - All notable changes to `disrex/magento-patch-installer` are documented here.\n\n
+![animation](https://raw.githubusercontent.com/orhun/git-cliff/main/website/static/img/git-cliff-anim.gif)\n
+"""
+# https://keats.github.io/tera/docs/#introduction
+body = """
+{%- macro print_commit(commit) -%}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif -%}
+{% if commit.breaking %}[**breaking**] {% endif -%}
+{% set first_line = commit.message | split(pat="\n") | first | trim -%}
+{% if first_line is matching("^[a-z]+[ ,:;)]") %}{{ first_line | upper_first }}{% else %}{{ first_line }}{% endif -%}
+{% if get_env(name="CLIFF_COMMIT_LINKS", default="1") == "1" %} - ([{{ commit.id | truncate(length=7, end="") }}](<REPO>/commit/{{ commit.id }}))
+{%- else %} - ({{ commit.id | truncate(length=7, end="") }})
+{%- endif -%}
+{% if commit.breaking and commit.breaking_description and commit.breaking_description != commit.message %} **BREAKING CHANGE:** {{ commit.breaking_description | split(pat="\n") | first | trim }}
+{%- endif -%}
+{% endmacro -%}
+
+{% set tag = version | default(value="") | trim_start_matches(pat="v") -%}
+{% set before = previous.version | default(value="") | trim_start_matches(pat="v") -%}
+{% if version -%}
+    {% if before -%}
+        ## [{{ tag }}](<REPO>/compare/{{ before }}...{{ tag }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+    {%- else -%}
+        ## [{{ tag }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+    {%- endif %}
+{% else -%}
+    ## [unreleased]
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits | filter(attribute="scope") | sort(attribute="scope") -%}
+{{ self::print_commit(commit=commit) }}
+{% endfor -%}
+{% for commit in commits -%}
+{% if not commit.scope -%}
+{{ self::print_commit(commit=commit) }}
+{% endif -%}
+{% endfor %}
+{% endfor -%}
+"""
+footer = ""
+trim = true
+postprocessors = [
+    { pattern = '<REPO>', replace = "https://github.com/disrex-group/magento-patch-installer" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+# "feat!:" and "BREAKING CHANGE:" entries are never dropped by a skip rule below.
+protect_breaking_commits = true
+# Spelling check with https://github.com/crate-ci/typos. Text in backticks and fenced blocks is code (class names,
+# config paths, CLI flags) and typos must never rewrite it, so the throw-away config tells it to ignore both.
+commit_preprocessors = [
+    { pattern = '.*', replace_command = '''c=$(mktemp) || exit 1
+cat > "$c" <<'TYPOS'
+[default]
+extend-ignore-re = ["(?s)```.*?```", "`[^`\\n]*`"]
+TYPOS
+typos --config "$c" --write-changes -
+s=$?
+rm -f "$c"
+exit $s''' },
+]
+# The first matching rule wins, so the skips come first.
+commit_parsers = [
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^Merge ", skip = true },
+    { message = "^chore\\(deps.*\\)", skip = true },
+    { message = "^feat", group = "<!-- 0 -->🚀 Features" },
+    { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+    { message = "^refactor", group = "<!-- 2 -->🚜 Refactor" },
+    { message = "^doc", group = "<!-- 3 -->📚 Documentation" },
+    { message = "^perf", group = "<!-- 4 -->⚡ Performance" },
+    { message = "^style", group = "<!-- 5 -->🎨 Styling" },
+    { message = "^test", group = "<!-- 6 -->🧪 Testing" },
+    { message = "^chore|^ci|^build", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
+    { body = ".*security", group = "<!-- 8 -->🛡️ Security" },
+    { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+    { message = ".*", group = "<!-- 10 -->💼 Other" },
+]
+filter_commits = false
+# Plain X.Y.Z tags; upstream's vX.Y.Z tags never match.
+tag_pattern = "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+topo_order = false
+sort_commits = "newest"
+
+[bump]
+features_always_bump_minor = true
+breaking_always_bump_major = true

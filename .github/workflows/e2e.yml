@@ -42,8 +42,7 @@ jobs:
           composer create-project --no-install --no-interaction --repository-url=https://mirror.mage-os.org/ "magento/project-community-edition=${{ matrix.magento }}" "$SHOP"
           cd "$SHOP"
           composer config --no-plugins repositories.0 composer https://mirror.mage-os.org/
-          composer remove --no-plugins --no-update magento/composer-dependency-version-audit-plugin || true
-          composer config --no-plugins allow-plugins true
+          composer config --no-plugins --json allow-plugins '{"magento/composer-dependency-version-audit-plugin": false, "*": true}'
           composer install --no-dev --no-interaction --no-progress --ignore-platform-reqs --no-security-blocking
       - name: Build a patch package from the installed files
         run: php tests/e2e-fixture.php "$SHOP" "${{ runner.temp }}/fixture"

@@ -45,6 +45,12 @@ final class Definition
     /** @var string|null */
     private $skipReason;
 
+    /** @var bool */
+    private $optional;
+
+    /** @var string|null */
+    private $enableReason;
+
     /**
      * @param array<string, string> $base package => version constraint
      * @param string[] $dependsOn
@@ -60,7 +66,8 @@ final class Definition
         ?string $line,
         bool $cumulative,
         ?string $description,
-        array $dependsOn
+        array $dependsOn,
+        bool $optional = false
     ) {
         $this->key = $key;
         $this->id = $id;
@@ -73,6 +80,7 @@ final class Definition
         $this->cumulative = $cumulative;
         $this->description = $description;
         $this->dependsOn = $dependsOn;
+        $this->optional = $optional;
     }
 
     public function key(): string
@@ -160,6 +168,26 @@ final class Definition
     public function skip(string $reason): void
     {
         $this->skipReason = $reason;
+    }
+
+    public function isOptional(): bool
+    {
+        return $this->optional;
+    }
+
+    public function enableReason(): ?string
+    {
+        return $this->enableReason;
+    }
+
+    public function enable(string $reason): void
+    {
+        $this->enableReason = $reason;
+    }
+
+    public function isDormant(): bool
+    {
+        return $this->optional && $this->enableReason === null;
     }
 
     public function label(): string

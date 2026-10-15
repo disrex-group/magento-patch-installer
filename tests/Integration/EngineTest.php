@@ -277,6 +277,175 @@ final class EngineTest extends TestCase
         self::assertSame(PatchResult::UNREADABLE, $summary->results()[0]->status());
     }
 
+    public function testLeavesAnOptionalPatchOffUntilTheProjectEnablesIt(): void
+    {
+        $this->fixture->file(self::FILE, self::PLAIN)->patch('OPT-1', Diffs::make(self::FILE, self::PLAIN, self::FIXED), ['acme/lib' => '*'], ['optional' => true]);
+
+        $off = $this->fixture->run(true);
+        $this->fixture->enable('OPT-1', 'DISC-1');
+        $on = $this->fixture->run(true);
+
+        self::assertSame(Summary::OK, $off->exitCode());
+        self::assertSame(PatchResult::NOT_ENABLED, $off->results()[0]->status());
+        self::assertSame([self::FILE => TargetResult::ABSENT], $this->states($off));
+        self::assertSame(Summary::OK, $on->exitCode());
+        self::assertSame([self::FILE => TargetResult::APPLIED], $this->states($on));
+        self::assertSame(self::FIXED, $this->fixture->read(self::FILE));
+    }
+
+    public function testTakesOffAnOptionalPatchItWroteOnceTheProjectNoLongerEnablesIt(): void
+    {
+        $plain = implode('', array_map(static function (int $n): string {
+            return "line {$n}\n";
+        }, range(1, 20)));
+        $required = str_replace("line 2\n", "line two\n", $plain);
+        $both = str_replace("line 18\n", "line eighteen\n", $required);
+        $this->fixture->file(self::FILE, $plain)
+            ->patch('FIX-1', Diffs::make(self::FILE, $plain, $required))
+            ->patch('OPT-1', Diffs::make(self::FILE, $plain, str_replace("line 18\n", "line eighteen\n", $plain)), ['acme/lib' => '*'], ['optional' => true])
+            ->enable('OPT-1');
+        $this->fixture->run(true);
+        self::assertSame($both, $this->fixture->read(self::FILE));
+
+        $this->fixture->enable('OPT-1', null);
+        $report = $this->fixture->run(false);
+        $applied = $this->fixture->run(true);
+
+        self::assertSame(Summary::MISSING, $report->exitCode(), 'an optional patch still on disk after it was switched off is outstanding');
+        self::assertSame(TargetResult::UNWANTED, $report->results()[1]->targets()[0]->state());
+        self::assertSame(Summary::OK, $applied->exitCode());
+        self::assertSame(TargetResult::REVERTED, $applied->results()[1]->targets()[0]->state());
+        self::assertSame($required, $this->fixture->read(self::FILE));
+        self::assertSame(Summary::OK, $this->fixture->run(false)->exitCode());
+    }
+
+    public function testForgetsAFileOnceTheOnlyPatchOnItIsSwitchedOff(): void
+    {
+        $this->fixture->file(self::FILE, self::PLAIN)
+            ->patch('OPT-1', Diffs::make(self::FILE, self::PLAIN, self::FIXED), ['acme/lib' => '*'], ['optional' => true])
+            ->enable('OPT-1');
+        $this->fixture->run(true);
+        $this->fixture->enable('OPT-1', null);
+
+        self::assertSame(Summary::OK, $this->fixture->run(true)->exitCode());
+        self::assertSame(self::PLAIN, $this->fixture->read(self::FILE));
+        self::assertStringNotContainsString(self::FILE, (string) $this->fixture->read('var/magento-patches/ledger.json'));
+    }
+
+    public function testLeavesAnOptionalPatchThatAnotherToolPutInPlace(): void
+    {
+        $this->fixture->file(self::FILE, self::FIXED)->patch('OPT-1', Diffs::make(self::FILE, self::PLAIN, self::FIXED), ['acme/lib' => '*'], ['optional' => true]);
+
+        $summary = $this->fixture->run(true);
+
+        self::assertSame(Summary::OK, $summary->exitCode());
+        self::assertSame([self::FILE => TargetResult::LEFT], $this->states($summary));
+        self::assertSame(self::FIXED, $this->fixture->read(self::FILE));
+    }
+
+    public function testTreatsAnEnabledOptionalPatchForAnotherVersionAsAnyOther(): void
+    {
+        $this->fixture->file(self::FILE, self::PLAIN)
+            ->patch('OPT-1', Diffs::make(self::FILE, self::PLAIN, self::FIXED), ['acme/lib' => '2.0.0'], ['optional' => true])
+            ->enable('OPT-1');
+
+        $summary = $this->fixture->run(true);
+
+        self::assertSame(Summary::OK, $summary->exitCode());
+        self::assertSame(PatchResult::OTHER_VERSION, $summary->results()[0]->status());
+        self::assertSame(self::PLAIN, $this->fixture->read(self::FILE));
+    }
+
+    public function testStillTakesOffAnOptionalPatchAfterARunThatCouldNotTakeItOff(): void
+    {
+        $plain = $this->lines();
+        $required = str_replace("line 5\n", "line five\n", $plain);
+        $this->fixture->file(self::FILE, $plain)
+            ->patch('W1', Diffs::make(self::FILE, $plain, $required))
+            ->patch('OPT', Diffs::make(self::FILE, $plain, str_replace("line 20\n", "line twenty\n", $plain)), ['acme/lib' => '*'], ['optional' => true])
+            ->enable('OPT');
+        $this->fixture->run(true);
+
+        $this->fixture->patch('W2', Diffs::make(self::FILE, $plain, str_replace("line 5\n", "line 5b\n", $plain)))->enable('OPT', null);
+        $stuck = $this->fixture->run(true);
+        $this->fixture->drop('W2');
+        $freed = $this->fixture->run(true);
+
+        self::assertSame(Summary::CONFLICT, $stuck->exitCode());
+        self::assertSame(TargetResult::CONFLICT, $this->resultOf($stuck, 'OPT')->targets()[0]->state());
+        self::assertSame(Summary::OK, $freed->exitCode());
+        self::assertSame(TargetResult::REVERTED, $this->resultOf($freed, 'OPT')->targets()[0]->state());
+        self::assertSame($required, $this->fixture->read(self::FILE));
+    }
+
+    public function testLeavesAnotherToolsCopyAloneEvenOnAFileItAlsoPatches(): void
+    {
+        $plain = $this->lines();
+        $foreign = str_replace("line 20\n", "line twenty\n", $plain);
+        $this->fixture->file(self::FILE, $foreign)
+            ->patch('W1', Diffs::make(self::FILE, $plain, str_replace("line 5\n", "line five\n", $plain)))
+            ->patch('OPT', Diffs::make(self::FILE, $plain, $foreign), ['acme/lib' => '*'], ['optional' => true])
+            ->enable('OPT');
+        $this->fixture->run(true);
+
+        $this->fixture->enable('OPT', null);
+        $off = $this->fixture->run(true);
+        $this->fixture->patch('W1', Diffs::make(self::FILE, $plain, str_replace("line 5\n", "line FIVE\n", $plain)));
+        $reissued = $this->fixture->run(true);
+
+        self::assertSame(Summary::OK, $off->exitCode());
+        self::assertSame(TargetResult::LEFT, $this->resultOf($off, 'OPT')->targets()[0]->state());
+        self::assertSame(Summary::OK, $reissued->exitCode());
+        self::assertSame(str_replace(["line 5\n", "line 20\n"], ["line FIVE\n", "line twenty\n"], $plain), $this->fixture->read(self::FILE), 'a rebuild keeps the copy it only found');
+    }
+
+    public function testADormantPatchThatCreatesAFileAgainDoesNotStopTheOneThatCreatesIt(): void
+    {
+        $file = 'vendor/acme/lib/New.php';
+        $this->fixture->patch('W1', Diffs::make($file, null, "<?php\n\nreturn 1;\n"))
+            ->patch('OPT', Diffs::make($file, null, "<?php\n\nreturn 2;\n"), ['acme/lib' => '*'], ['optional' => true, 'depends' => ['W1']]);
+
+        $summary = $this->fixture->run(true);
+
+        self::assertSame(Summary::OK, $summary->exitCode());
+        self::assertSame("<?php\n\nreturn 1;\n", $this->fixture->read($file));
+    }
+
+    public function testBlocksAPatchBuiltOnAnOptionalPatchThatIsNotEnabled(): void
+    {
+        $other = 'vendor/acme/lib/src/Other.php';
+        $this->fixture->file(self::FILE, self::PLAIN)->file($other, "a\n")
+            ->patch('OPT', Diffs::make(self::FILE, self::PLAIN, self::FIXED), ['acme/lib' => '*'], ['optional' => true])
+            ->patch('TOP', Diffs::make($other, "a\n", "b\n"), ['acme/lib' => '*'], ['optional' => true, 'depends' => ['OPT']])
+            ->enable('TOP');
+
+        $report = $this->fixture->run(false);
+        $applied = $this->fixture->run(true);
+
+        self::assertSame(PatchResult::BLOCKED, $this->resultOf($report, 'TOP')->status());
+        self::assertSame(Summary::CONFIG_ERROR, $applied->exitCode());
+        self::assertSame(PatchResult::BLOCKED, $this->resultOf($applied, 'TOP')->status());
+        self::assertSame("a\n", $this->fixture->read($other));
+    }
+
+    private function lines(): string
+    {
+        return implode('', array_map(static function (int $n): string {
+            return "line {$n}\n";
+        }, range(1, 24)));
+    }
+
+    private function resultOf(Summary $summary, string $id): PatchResult
+    {
+        foreach ($summary->results() as $result) {
+            if ($result->definition()->id() === $id) {
+                return $result;
+            }
+        }
+
+        self::fail('no result for ' . $id);
+    }
+
     /**
      * @return array<string, string> path => state
      */

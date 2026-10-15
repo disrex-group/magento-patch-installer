@@ -26,40 +26,59 @@ final class LockFile
     }
 
     /**
-     * @return array{_readme: string[], content-hash: string, patches: array<int, array<string, mixed>>}
+     * @return array{_readme: string[], content-hash: string, packages: array<string, string|null>, patches: array<int, array<string, mixed>>}
      */
-    public static function build(Catalog $catalog, Engine $engine, Project $project): array
+    public static function build(Catalog $catalog, Engine $engine, Project $project, string $rootName): array
     {
+        $packages = [];
         $patches = [];
 
         foreach ($catalog->definitions() as $definition) {
             $files = $engine->filePatches($definition);
 
-            if ($engine->baseMismatch($definition) !== null || !is_array($files)) {
+            if ($definition->isDormant() || $engine->baseMismatch($definition) !== null || !is_array($files)) {
                 continue;
             }
 
-            $patches[] = [
+            // The root's version is its branch, so it would change the lock on every checkout.
+            if ($definition->owner() !== $rootName) {
+                $packages[$definition->owner()] = $project->version($definition->owner());
+            }
+
+            $patch = [
                 'package' => $definition->owner(),
-                'version' => $project->version($definition->owner()),
                 'id' => $definition->id(),
                 'line' => $definition->line(),
                 'label' => $definition->label(),
                 'source' => $definition->sourceName(),
                 'sha256' => hash_file('sha256', $definition->source()) ?: null,
-                'skipped' => $definition->skipReason(),
-                'files' => array_values(array_unique(array_map(static function ($patch): string {
-                    return $patch->path();
-                }, $files))),
             ];
+
+            if ($definition->isOptional()) {
+                $patch['optional'] = true;
+                $patch['enabled'] = $definition->enableReason();
+            }
+
+            if ($definition->skipReason() !== null) {
+                $patch['skipped'] = $definition->skipReason();
+            }
+
+            $patch['files'] = array_values(array_unique(array_map(static function ($file): string {
+                return $file->path();
+            }, $files)));
+
+            $patches[] = $patch;
         }
+
+        ksort($packages);
 
         return [
             '_readme' => [
-                'The security patches this project takes, written by disrex/magento-patch-installer.',
+                'The patches this project takes, written by disrex/magento-patch-installer.',
                 'composer update and composer magento-patches:lock rewrite it. Commit it.',
             ],
-            'content-hash' => hash('sha256', (string) json_encode($patches)),
+            'content-hash' => hash('sha256', (string) json_encode(['packages' => (object) $packages, 'patches' => $patches])),
+            'packages' => $packages,
             'patches' => $patches,
         ];
     }
@@ -96,6 +115,11 @@ final class LockFile
      */
     public function write(array $lock): bool
     {
+        // An empty PHP array would encode as [], and "packages" has to stay a map for whoever reads the file.
+        if (($lock['packages'] ?? null) === []) {
+            $lock['packages'] = new \stdClass();
+        }
+
         $json = json_encode($lock, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
 
         if (is_file($this->file) && file_get_contents($this->file) === $json) {

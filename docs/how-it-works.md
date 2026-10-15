@@ -48,12 +48,17 @@ The plugin keeps a ledger in `var/magento-patches/ledger.json`: for every file i
 
 A patch the project skips is taken off in reverse order, before anything is applied, so nothing is reverted while a later patch still sits on it.
 
+## Optional patches
+
+An optional patch the project has not enabled is never written. When the project switches one off again, the plugin takes it off the files where the ledger shows it wrote that patch and the file still has the recorded hash, the same way it replaces a re-issued patch. It leaves any other copy alone and reports it as `left`, so it does not fight a second patch tool during a migration. If the plugin wrote a copy but cannot take it off cleanly, for instance because another patch on the same file does not go on in that run, the report shows that copy as a `conflict` and the run exits 2. Nothing is overwritten, and the ledger keeps the copy, so a later run takes it off once the file allows it.
+
 ## Advice
 
-`status`, `apply` and the install output warn when:
+`status`, `apply`, `verify` and the install output warn when:
 
 - the Magento version is within six months of its end of life, or past it. The dates ship in `resources/magento-eol.json`; the plugin never goes online while patching.
 - the store is one patch release behind the line the patches are built for. Adobe's isolated patches only exist for the newest `-p` of a line.
+- an enabled optional patch does not fit this install.
 - `magento-patches.lock` does not match.
 
 Advice never changes the exit code.

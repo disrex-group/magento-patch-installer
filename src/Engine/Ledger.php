@@ -19,7 +19,7 @@ final class Ledger
     /** @var string */
     private $file;
 
-    /** @var array{version: int, files: array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string}>}>} */
+    /** @var array{version: int, files: array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string, adopted?: bool}>}>} */
     private $data;
 
     /** @var bool */
@@ -33,7 +33,7 @@ final class Ledger
     }
 
     /**
-     * @return array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string}>}|null
+     * @return array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string, adopted?: bool}>}|null
      */
     public function entry(string $path): ?array
     {
@@ -41,7 +41,7 @@ final class Ledger
     }
 
     /**
-     * @param array<int, array{patch: string, file: FilePatch}> $steps
+     * @param array<int, array{patch: string, file: FilePatch, adopted: bool}> $steps adopted: found in place, not written here
      */
     public function record(string $path, string $sha256, array $steps, string $at): void
     {
@@ -49,11 +49,11 @@ final class Ledger
             'sha256' => $sha256,
             'at' => $at,
             'steps' => array_map(static function (array $step) use ($path): array {
-                return [
+                return array_merge([
                     'patch' => $step['patch'],
                     'fingerprint' => $step['file']->fingerprint(),
                     'diff' => $step['file']->renderFor($path),
-                ];
+                ], $step['adopted'] ? ['adopted' => true] : []);
             }, $steps),
         ];
         $this->changed = true;
@@ -100,7 +100,7 @@ final class Ledger
     }
 
     /**
-     * @return array{version: int, files: array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string}>}>}
+     * @return array{version: int, files: array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string, adopted?: bool}>}>}
      */
     private function read(): array
     {
@@ -118,7 +118,7 @@ final class Ledger
             }
         }
 
-        /** @var array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string}>}> $files */
+        /** @var array<string, array{sha256: string, at: string, steps: array<int, array{patch: string, fingerprint: string, diff: string, adopted?: bool}>}> $files */
         return ['version' => self::VERSION, 'files' => $files];
     }
 }

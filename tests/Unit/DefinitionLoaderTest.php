@@ -117,13 +117,129 @@ final class DefinitionLoaderTest extends TestCase
             'acme/other' => ['skip' => ['X' => 'nothing declared']],
         ]);
         $errors = implode("\n", $catalog->errors());
-        self::assertStringContainsString('may only contain "skip"', $errors);
+        self::assertStringContainsString('may only contain "skip" and "enable"', $errors);
         self::assertStringContainsString('declares no patches', $errors);
 
         $catalog = $this->load($line, ['disrex/*'], ['disrex/patches' => ['skip' => ['JUL' => 'too broad', 'NOPE' => 'no such patch']]]);
         $errors = implode("\n", $catalog->errors());
         self::assertStringContainsString('skip it as "JUL@<line>"', $errors);
         self::assertStringContainsString('no patch "NOPE"', $errors);
+    }
+
+    public function testEnablesAnOptionalPatchWithTheReasonTheProjectGives(): void
+    {
+        $catalog = $this->load(['patches' => [
+            ['id' => 'BASE', 'source' => 'a.diff'],
+            ['id' => 'OPT', 'source' => 'b.diff', 'optional' => true, 'depends' => ['BASE']],
+            ['id' => 'IDLE', 'source' => 'c.diff', 'optional' => true],
+        ]], ['disrex/*'], ['disrex/patches' => ['enable' => ['OPT' => 'DISC-456']]]);
+
+        self::assertSame([], $catalog->errors());
+        $byId = [];
+        foreach ($catalog->definitions() as $definition) {
+            $byId[$definition->id()] = $definition;
+        }
+        self::assertFalse($byId['BASE']->isDormant());
+        self::assertSame('DISC-456', $byId['OPT']->enableReason());
+        self::assertFalse($byId['OPT']->isDormant());
+        self::assertTrue($byId['IDLE']->isDormant());
+    }
+
+    public function testRefusesOptionalPatchesThatCannotWorkAsDeclared(): void
+    {
+        $catalog = $this->load([
+            'patches' => [
+                ['id' => 'OPT', 'source' => 'a.diff', 'optional' => true],
+                ['id' => 'MUST', 'source' => 'b.diff', 'depends' => ['OPT']],
+                ['id' => 'YES', 'source' => 'c.diff', 'optional' => 'yes'],
+            ],
+            'lines' => ['x' => ['base' => ['acme/lib' => '1.0.0'], 'cumulative' => true, 'patches' => [['id' => 'LINK', 'source' => 'd.diff', 'optional' => true]]]],
+        ]);
+        $errors = implode("\n", $catalog->errors());
+
+        self::assertStringContainsString('"MUST" depends on "OPT", which is optional', $errors);
+        self::assertStringContainsString('"YES" has an "optional" that is not true or false', $errors);
+        self::assertStringContainsString('"LINK" is marked "optional" in cumulative line "x"', $errors);
+    }
+
+    public function testRefusesEnablesThatCannotDoWhatTheySay(): void
+    {
+        $config = ['patches' => [
+            ['id' => 'MUST', 'source' => 'a.diff'],
+            ['id' => 'OPT', 'source' => 'b.diff', 'optional' => true],
+            ['id' => 'TOP', 'source' => 'c.diff', 'optional' => true, 'depends' => ['OPT']],
+            ['id' => 'IDLE', 'source' => 'd.diff', 'optional' => true],
+        ]];
+
+        $errors = implode("\n", $this->load($config, ['disrex/*'], ['disrex/patches' => [
+            'enable' => ['MUST' => 'r', 'NOPE' => 'r', 'OPT' => '', 'TOP' => 'r'],
+            'skip' => ['IDLE' => 'r'],
+        ]])->errors());
+
+        self::assertStringContainsString('"MUST" is not optional', $errors);
+        self::assertStringContainsString('no patch "NOPE" to enable', $errors);
+        self::assertStringContainsString('enabling "OPT" needs a reason', $errors);
+        self::assertStringContainsString('"TOP" is enabled, but it builds on OPT, which is optional and not enabled', $errors);
+        self::assertStringContainsString('"IDLE" is optional and not enabled, so there is nothing to skip', $errors);
+
+        $errors = implode("\n", $this->load($config, ['disrex/*'], ['disrex/patches' => [
+            'enable' => ['OPT' => 'r'],
+            'skip' => ['OPT' => 'r'],
+        ]])->errors());
+        self::assertStringContainsString('"OPT" is both enabled and skipped', $errors);
+    }
+
+    public function testSkippingARequiredPatchAlsoSkipsAnEnabledPatchBuiltOnIt(): void
+    {
+        $catalog = $this->load(['patches' => [
+            ['id' => 'BASE', 'source' => 'a.diff'],
+            ['id' => 'OPT', 'source' => 'b.diff', 'optional' => true, 'depends' => ['BASE']],
+        ]], ['disrex/*'], ['disrex/patches' => ['enable' => ['OPT' => 'r'], 'skip' => ['BASE' => 'breaks it']]]);
+
+        self::assertSame([], $catalog->errors());
+        self::assertSame('depends on BASE, which this project skips', $catalog->definitions()[1]->skipReason());
+    }
+
+    public function testSkipsADependedOnStandalonePatchByItsBareIdWhenALineAlsoHasThatId(): void
+    {
+        $catalog = $this->load([
+            'patches' => [
+                ['id' => 'X', 'source' => 'a.diff'],
+                ['id' => 'Y', 'source' => 'b.diff', 'depends' => ['X']],
+            ],
+            'lines' => ['L' => ['base' => ['acme/lib' => '1.0'], 'patches' => [['id' => 'X', 'source' => 'c.diff']]]],
+        ], ['disrex/*'], ['disrex/patches' => ['skip' => ['X' => 'r']]]);
+
+        self::assertSame([], $catalog->errors());
+        foreach ($catalog->definitions() as $definition) {
+            self::assertNotNull($definition->skipReason(), $definition->label());
+        }
+    }
+
+    public function testJudgesEachEnabledPatchOnItsOwnTerms(): void
+    {
+        $declarations = ['patches' => [
+            ['id' => 'OPT', 'source' => 'a.diff', 'optional' => true],
+            ['id' => 'MUST', 'source' => 'b.diff', 'depends' => ['OPT']],
+            ['id' => 'B', 'source' => 'c.diff'],
+            ['id' => 'E', 'source' => 'd.diff', 'optional' => true, 'depends' => ['B', 'OPT']],
+        ]];
+
+        $errors = implode("\n", $this->load($declarations, ['disrex/*'], ['disrex/patches' => ['enable' => ['E' => 'r'], 'skip' => ['B' => 'r']]])->errors());
+        self::assertStringNotContainsString('"MUST" is enabled', $errors);
+        self::assertStringContainsString('"E" is enabled, but it builds on OPT', $errors, 'a skipped prerequisite listed first does not hide it');
+
+        $errors = implode("\n", $this->load($declarations, ['disrex/*'], ['disrex/patches' => ['enable' => ['OPT' => true]]])->errors());
+        self::assertStringContainsString('enabling "OPT" needs a reason', $errors);
+    }
+
+    public function testAcceptsOptionalFalseInACumulativeLine(): void
+    {
+        $catalog = $this->load(['lines' => ['x' => ['base' => ['acme/lib' => '1.0.0'], 'cumulative' => true, 'patches' => [
+            ['id' => 'LINK', 'source' => 'a.diff', 'optional' => false],
+        ]]]]);
+
+        self::assertSame([], $catalog->errors());
     }
 
     /**

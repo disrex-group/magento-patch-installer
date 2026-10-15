@@ -101,6 +101,12 @@ final class DefinitionReader
                     continue;
                 }
 
+                // A chain with a link switched off would leave every later link without the code it was cut against.
+                if ($cumulative && ($entry['optional'] ?? false) === true) {
+                    $this->errors[] = sprintf('%s: patch "%s" is marked "optional" in cumulative line "%s", where every link is needed', $owner, (string) $entry['id'], $line);
+                    continue;
+                }
+
                 $definition = $this->definition($owner, $entry, $spec['base'], $line, $cumulative, $packageDir, $sourceDir);
                 if ($definition !== null) {
                     $definitions[] = $definition;
@@ -188,6 +194,13 @@ final class DefinitionReader
             $dependsOn[] = (string) $dependency;
         }
 
+        $optional = $entry['optional'] ?? false;
+        if (!is_bool($optional)) {
+            $this->errors[] = sprintf('%s: patch "%s" has an "optional" that is not true or false', $owner, $id);
+
+            return null;
+        }
+
         $source = $this->confine($owner, $id, (string) $entry['source'], $packageDir, $sourceDir);
         if ($source === null) {
             return null;
@@ -204,7 +217,8 @@ final class DefinitionReader
             $line,
             $cumulative,
             isset($entry['description']) ? trim((string) $entry['description']) : null,
-            $dependsOn
+            $dependsOn,
+            $optional
         );
     }
 

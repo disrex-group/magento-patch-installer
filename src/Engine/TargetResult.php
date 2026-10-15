@@ -14,6 +14,7 @@ final class TargetResult
     public const REVERTED = 'reverted';
     public const UNWANTED = 'unwanted';
     public const ABSENT = 'absent';
+    public const LEFT = 'left';
 
     /** @var string */
     private $path;

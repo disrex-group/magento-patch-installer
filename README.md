@@ -24,6 +24,8 @@ composer magento-patches:list      # what the trusted packages declare
 composer magento-patches:lock      # write magento-patches.lock; --check for CI
 ```
 
+A patch package can mark a patch `optional`. It stays off until the project enables it under `extra.magento-patches.sources` with a reason; see [Declaring patches](https://disrex-group.github.io/magento-patch-installer/declaring-patches.html).
+
 Exit codes: 0 all in place, 1 missing, 2 conflict, 3 configuration error. Run `verify` as its own pipeline step after `composer install`.
 
 ## What it guarantees

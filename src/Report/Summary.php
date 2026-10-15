@@ -109,7 +109,13 @@ final class Summary
             }
         }
 
-        foreach ([PatchResult::BLOCKED => 'blocked', PatchResult::SKIPPED => 'skipped by this project', PatchResult::OTHER_VERSION => 'for other versions'] as $status => $label) {
+        $statuses = [
+            PatchResult::BLOCKED => 'blocked',
+            PatchResult::SKIPPED => 'skipped by this project',
+            PatchResult::NOT_ENABLED => 'optional, not enabled',
+            PatchResult::OTHER_VERSION => 'for other versions',
+        ];
+        foreach ($statuses as $status => $label) {
             $count = $this->countPatches([$status]);
             if ($count > 0) {
                 $parts[] = sprintf('%d %s', $count, $label);

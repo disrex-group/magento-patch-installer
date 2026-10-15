@@ -43,7 +43,8 @@ final class DefinitionLoader
         }
 
         $ordered = $this->order($all);
-        $this->applySkips($settings->sources(), $ordered);
+        $this->refuseMandatoryOnOptional($ordered);
+        $this->applySources($settings->sources(), $ordered);
 
         return new Catalog($ordered, $this->errors);
     }
@@ -167,12 +168,40 @@ final class DefinitionLoader
     }
 
     /**
-     * Only the root package can switch a patch off: which patches a store takes is the store's decision.
+     * @param Definition[] $ordered
+     */
+    private function refuseMandatoryOnOptional(array $ordered): void
+    {
+        $byKey = [];
+        foreach ($ordered as $definition) {
+            $byKey[$definition->key()] = $definition;
+        }
+
+        foreach ($ordered as $definition) {
+            if ($definition->isOptional()) {
+                continue;
+            }
+
+            foreach ($definition->requires() as $key) {
+                if (isset($byKey[$key]) && $byKey[$key]->isOptional()) {
+                    $this->errors[] = sprintf(
+                        '%s: patch "%s" depends on "%s", which is optional; a patch every store takes cannot build on one a store may leave off',
+                        $definition->owner(),
+                        $definition->label(),
+                        $byKey[$key]->label()
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Only the root package can switch a patch on or off: which patches a store takes is the store's decision.
      *
      * @param mixed $sources
      * @param Definition[] $ordered
      */
-    private function applySkips($sources, array $ordered): void
+    private function applySources($sources, array $ordered): void
     {
         if ($sources === [] || $sources === null) {
             return;
@@ -197,8 +226,8 @@ final class DefinitionLoader
                 return $definition->owner() === $owner;
             });
 
-            if (!is_array($rules) || array_diff(array_keys($rules), ['skip']) !== []) {
-                $this->errors[] = sprintf('sources: "%s" may only contain "skip"', $owner);
+            if (!is_array($rules) || array_diff(array_keys($rules), ['skip', 'enable']) !== []) {
+                $this->errors[] = sprintf('sources: "%s" may only contain "skip" and "enable"', $owner);
                 continue;
             }
 
@@ -207,18 +236,42 @@ final class DefinitionLoader
                 continue;
             }
 
-            $skip = $rules['skip'] ?? [];
-            if (!is_array($skip)) {
-                $this->errors[] = sprintf('sources: "%s" has a "skip" that is not an object of id => reason', $owner);
-                continue;
+            foreach (['enable', 'skip'] as $rule) {
+                if (!is_array($rules[$rule] ?? [])) {
+                    $this->errors[] = sprintf('sources: "%s" has a "%s" that is not an object of id => reason', $owner, $rule);
+                    continue 2;
+                }
             }
 
-            foreach ($skip as $identifier => $reason) {
+            foreach ($rules['enable'] ?? [] as $identifier => $reason) {
                 $identifier = (string) $identifier;
-                $parts = explode('@', $identifier, 2);
-                $matches = array_filter($mine, static function (Definition $definition) use ($parts): bool {
-                    return $definition->id() === $parts[0] && (!isset($parts[1]) || $parts[1] === $definition->line());
-                });
+                $matches = $this->matching($mine, $identifier);
+
+                if (!is_string($reason) && !is_int($reason) || trim((string) $reason) === '') {
+                    $this->errors[] = sprintf('sources: enabling "%s" needs a reason, such as the ticket that asked for it', $identifier);
+                    continue;
+                }
+
+                if ($matches === []) {
+                    $this->errors[] = sprintf('sources: "%s" has no patch "%s" to enable', $owner, $identifier);
+                    continue;
+                }
+
+                if (array_filter($matches, static function (Definition $definition): bool {
+                    return !$definition->isOptional();
+                }) !== []) {
+                    $this->errors[] = sprintf('sources: "%s" is not optional; it applies without being enabled', $identifier);
+                    continue;
+                }
+
+                foreach ($matches as $definition) {
+                    $definition->enable(trim((string) $reason));
+                }
+            }
+
+            foreach ($rules['skip'] ?? [] as $identifier => $reason) {
+                $identifier = (string) $identifier;
+                $matches = $this->matching($mine, $identifier);
 
                 if (!is_scalar($reason)) {
                     $this->errors[] = sprintf('sources: the reason for skipping "%s" must be text', $identifier);
@@ -230,13 +283,29 @@ final class DefinitionLoader
                     continue;
                 }
 
+                if (array_filter($matches, static function (Definition $definition): bool {
+                    return $definition->enableReason() !== null;
+                }) !== []) {
+                    $this->errors[] = sprintf('sources: "%s" is both enabled and skipped', $identifier);
+                    continue;
+                }
+
+                $live = array_filter($matches, static function (Definition $definition): bool {
+                    return !$definition->isDormant();
+                });
+
+                if ($live === []) {
+                    $this->errors[] = sprintf('sources: "%s" is optional and not enabled, so there is nothing to skip', $identifier);
+                    continue;
+                }
+
                 // A bare id matches that id in every line, and a line published later would silently lose its chain.
-                if (!isset($parts[1]) && $this->anyDependedOn($matches, $dependedOn)) {
+                if (strpos($identifier, '@') === false && $this->anyDependedOnInALine($live, $dependedOn)) {
                     $this->errors[] = sprintf('sources: "%s" is built on by other patches; skip it as "%s@<line>"', $identifier, $identifier);
                     continue;
                 }
 
-                foreach ($matches as $definition) {
+                foreach ($live as $definition) {
                     $definition->skip(trim((string) $reason) === '' ? 'skipped by this project' : trim((string) $reason));
                 }
             }
@@ -246,8 +315,14 @@ final class DefinitionLoader
         foreach ($ordered as $definition) {
             $labels[$definition->key()] = $definition;
 
-            if ($definition->skipReason() !== null) {
+            if ($definition->skipReason() !== null || $definition->isDormant()) {
                 continue;
+            }
+
+            foreach ($definition->requires() as $key) {
+                if ($definition->isOptional() && isset($labels[$key]) && $labels[$key]->isDormant()) {
+                    $this->errors[] = sprintf('sources: "%s" is enabled, but it builds on %s, which is optional and not enabled; enable both', $definition->label(), $labels[$key]->label());
+                }
             }
 
             foreach ($definition->requires() as $key) {
@@ -261,12 +336,26 @@ final class DefinitionLoader
 
     /**
      * @param Definition[] $definitions
+     *
+     * @return Definition[]
+     */
+    private function matching(array $definitions, string $identifier): array
+    {
+        $parts = explode('@', $identifier, 2);
+
+        return array_filter($definitions, static function (Definition $definition) use ($parts): bool {
+            return $definition->id() === $parts[0] && (!isset($parts[1]) || $parts[1] === $definition->line());
+        });
+    }
+
+    /**
+     * @param Definition[] $definitions
      * @param array<string, bool> $dependedOn
      */
-    private function anyDependedOn(array $definitions, array $dependedOn): bool
+    private function anyDependedOnInALine(array $definitions, array $dependedOn): bool
     {
         foreach ($definitions as $definition) {
-            if (isset($dependedOn[$definition->key()])) {
+            if ($definition->line() !== null && isset($dependedOn[$definition->key()])) {
                 return true;
             }
         }

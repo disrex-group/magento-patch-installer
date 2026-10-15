@@ -20,7 +20,7 @@ nav_order: 3
 | Code | Meaning |
 |---|---|
 | 0 | Every patch meant for this store is in place |
-| 1 | A patch is missing, a skipped patch is still on disk, or a patch was blocked by a missing prerequisite |
+| 1 | A patch is missing, a skipped patch is still on disk, a patch the plugin wrote is still on disk after the project stopped enabling it, or a patch was blocked by a missing prerequisite |
 | 2 | A file matches neither side of a patch; nothing was overwritten |
 | 3 | The configuration is broken: an untrusted package declares patches, a file is missing, a constraint does not parse |
 
@@ -32,11 +32,11 @@ Every patch the trusted packages declare, grouped by package, with the line it b
 
 ## status
 
-The store, then every patch meant for it. Patches for other versions are folded into one line; `-v` lists them with the reason.
+The store, then every patch meant for it. Patches for other versions and optional patches that are not enabled are each folded into one line; `-v` lists them, and the reason each enabled patch was switched on.
 
 ## apply
 
-Applies what is missing and takes off what the project skips. `--dry-run` reports what would change and writes nothing.
+Applies what is missing and takes off what the project skips or no longer enables. `--dry-run` reports what would change and writes nothing.
 
 ## verify
 
@@ -68,4 +68,4 @@ Writes `magento-patches.lock`, the record of the patches this project takes. See
 }
 ```
 
-A target's `state` is one of `present`, `applied`, `missing`, `conflict`, `not-covered`, `unwanted`, `reverted` or `absent`.
+A target's `state` is one of `present`, `applied`, `missing`, `conflict`, `not-covered`, `unwanted`, `reverted`, `left` or `absent`. `left` means an optional patch that is not enabled is in place, but the plugin did not write that copy, or the file changed since it did, so it leaves the copy alone. A patch's `status` is `applies`, `other-version`, `skipped`, `not-enabled`, `blocked` or `unreadable`; `optional` and `enabled` (the reason, or null) say whether it is an optional patch and why it is on.

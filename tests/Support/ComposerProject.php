@@ -39,9 +39,9 @@ final class ComposerProject
                 ['packagist.org' => false],
                 ['type' => 'path', 'url' => $this->workspace->path('lib'), 'options' => ['symlink' => false]],
                 ['type' => 'path', 'url' => $this->workspace->path('patches'), 'options' => ['symlink' => false]],
-                ['type' => 'path', 'url' => dirname(__DIR__, 2), 'options' => ['symlink' => true, 'versions' => ['disrex/magento-patch-installer' => '0.1.0']]],
+                ['type' => 'path', 'url' => dirname(__DIR__, 2), 'options' => ['symlink' => true, 'versions' => ['disrex/magento-patch-installer' => '0.2.0']]],
             ],
-            'require' => ['acme/lib' => '1.0.0', 'disrex/test-patches' => '1.0.0', 'disrex/magento-patch-installer' => '0.1.0'],
+            'require' => ['acme/lib' => '1.0.0', 'disrex/test-patches' => '1.0.0', 'disrex/magento-patch-installer' => '0.2.0'],
             'config' => ['allow-plugins' => ['disrex/magento-patch-installer' => true]],
             'extra' => ['magento-patches' => ['trust' => ['disrex/*']]],
         ];

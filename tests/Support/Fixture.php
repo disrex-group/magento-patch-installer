@@ -85,9 +85,37 @@ final class Fixture
         return $this;
     }
 
+    public function drop(string $id): self
+    {
+        $this->config['patches'] = array_values(array_filter($this->config['patches'] ?? [], static function (array $entry) use ($id): bool {
+            return $entry['id'] !== $id;
+        }));
+
+        return $this;
+    }
+
+    public function rootPatch(string $id, string $diff): self
+    {
+        $this->workspace->write('patches/' . $id . '.diff', $diff);
+        $this->rootConfig['patches'][] = ['id' => $id, 'source' => 'patches/' . $id . '.diff', 'base' => ['acme/lib' => '*']];
+
+        return $this;
+    }
+
     public function skip(string $identifier, string $reason = 'test'): self
     {
         $this->rootConfig['sources']['disrex/patches']['skip'][$identifier] = $reason;
+
+        return $this;
+    }
+
+    public function enable(string $identifier, ?string $reason = 'test'): self
+    {
+        if ($reason === null) {
+            unset($this->rootConfig['sources']['disrex/patches']['enable'][$identifier]);
+        } else {
+            $this->rootConfig['sources']['disrex/patches']['enable'][$identifier] = $reason;
+        }
 
         return $this;
     }

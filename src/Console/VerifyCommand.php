@@ -31,11 +31,12 @@ final class VerifyCommand extends PatchesCommand
             return $summary->exitCode();
         }
 
+        $advisories = $runtime->advisories();
         $output->writeln(TextReport::escape($summary->headline()));
-        foreach (TextReport::results($summary, $output->isVerbose(), true) as $line) {
+        foreach (array_merge(TextReport::advisories($advisories), TextReport::results($summary, $output->isVerbose(), true)) as $line) {
             $output->writeln($line);
         }
-        $output->writeln(TextReport::closing($summary, $runtime->advisories()));
+        $output->writeln(TextReport::closing($summary, $advisories));
 
         return $summary->exitCode();
     }

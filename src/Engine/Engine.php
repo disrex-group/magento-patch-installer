@@ -15,12 +15,13 @@ use Disrex\MagentoPatchInstaller\Project\Project;
 final class Engine
 {
     private const RANK = [
-        TargetResult::CONFLICT => 6,
-        TargetResult::MISSING => 5,
-        TargetResult::UNWANTED => 4,
-        TargetResult::APPLIED => 3,
-        TargetResult::REVERTED => 3,
-        TargetResult::PRESENT => 2,
+        TargetResult::CONFLICT => 7,
+        TargetResult::MISSING => 6,
+        TargetResult::UNWANTED => 5,
+        TargetResult::APPLIED => 4,
+        TargetResult::REVERTED => 4,
+        TargetResult::PRESENT => 3,
+        TargetResult::LEFT => 2,
         TargetResult::ABSENT => 1,
         TargetResult::NOT_COVERED => 0,
     ];
@@ -57,6 +58,9 @@ final class Engine
 
     /** @var array<string, Definition> */
     private $wanted = [];
+
+    /** @var array<string, Definition> optional patches the project has not enabled */
+    private $dormant = [];
 
     /** @var array<string, true> */
     private $pendingRebuild = [];
@@ -165,7 +169,9 @@ final class Engine
 
             $this->files[$key] = $patches;
 
-            if ($definition->skipReason() !== null) {
+            if ($definition->isDormant()) {
+                $this->dormant[$key] = $definition;
+            } elseif ($definition->skipReason() !== null) {
                 $unwanted[$key] = $definition;
             } else {
                 $this->wanted[$key] = $definition;
@@ -184,9 +190,11 @@ final class Engine
             $results[$key] = $this->reverse($definition, $write);
         }
 
-        $broken = [];
+        $broken = array_map(static function (Definition $definition): string {
+            return $definition->label();
+        }, $this->dormant);
         foreach ($this->wanted as $key => $definition) {
-            $missing = $write ? $this->firstBroken($definition, $broken) : null;
+            $missing = $this->firstBroken($definition, $broken);
 
             if ($missing !== null) {
                 $results[$key] = new PatchResult($definition, PatchResult::BLOCKED, sprintf('requires %s, which is not in place', $missing));
@@ -199,6 +207,10 @@ final class Engine
             if ($write && !$results[$key]->isComplete()) {
                 $broken[$key] = $definition->label();
             }
+        }
+
+        foreach ($this->dormant as $key => $definition) {
+            $results[$key] = $this->dormantResult($definition);
         }
 
         if ($write) {
@@ -220,6 +232,7 @@ final class Engine
         $this->slots = [];
         $this->ancestors = [];
         $this->wanted = [];
+        $this->dormant = [];
         $this->pendingRebuild = [];
         $this->rebuilt = [];
         $this->vacated = [];
@@ -289,7 +302,7 @@ final class Engine
                 continue;
             }
 
-            $wanted = $this->wantedOn($fileKey);
+            $wanted = $this->keptOn($fileKey, $entry);
             $recorded = array_column($entry['steps'], 'fingerprint');
             $current = array_map(static function (array $step): string {
                 return $step['file']->fingerprint();
@@ -395,6 +408,50 @@ final class Engine
         return new PatchResult($definition, PatchResult::SKIPPED, $definition->skipReason(), $targets);
     }
 
+    /**
+     * A patch the project has not enabled is never written here. What this plugin wrote for it earlier came off in
+     * rebuildChangedFiles(), which only touches files the ledger vouches for; a copy another tool put in place stays.
+     */
+    private function dormantResult(Definition $definition): PatchResult
+    {
+        $key = $definition->key();
+        $targets = [];
+
+        foreach ($this->files[$key] as $index => $patch) {
+            $states = [];
+
+            foreach ($this->placements($patch) as $named => $path) {
+                if ($path === null) {
+                    $states[$named] = [TargetResult::ABSENT, null];
+                    continue;
+                }
+
+                $this->touched[$path] = $this->project->rootFiles()->key($patch->path());
+                $entry = $this->ledger->entry($path);
+                $ours = in_array($patch->fingerprint(), $this->recordedSteps($entry, false), true);
+                $applied = $this->git->isApplied($patch->renderFor($path));
+
+                if ($ours && isset($this->rebuilt[$path]) && !$applied) {
+                    $states[$path] = [TargetResult::REVERTED, null];
+                } elseif ($ours && isset($this->pendingRebuild[$path])) {
+                    $states[$path] = [TargetResult::UNWANTED, 'still in place; magento-patches:apply removes it'];
+                } elseif ($applied && $ours && $entry !== null && $this->project->hash($path) === $entry['sha256']) {
+                    $states[$path] = [TargetResult::CONFLICT, 'written by this plugin, but it cannot be taken off cleanly; take it off by hand'];
+                } elseif ($applied) {
+                    $states[$path] = [TargetResult::LEFT, $ours
+                        ? 'written by this plugin, but the file changed since, so it is left alone'
+                        : 'in place, but not written by this plugin, so it is left alone'];
+                } else {
+                    $states[$path] = [TargetResult::ABSENT, null];
+                }
+            }
+
+            $targets[] = $this->combine($patch, $states, $key, $index);
+        }
+
+        return new PatchResult($definition, PatchResult::NOT_ENABLED, 'optional; this project has not enabled it', $targets);
+    }
+
     private function forward(Definition $definition, bool $write): PatchResult
     {
         $key = $definition->key();
@@ -488,7 +545,7 @@ final class Engine
         }
 
         if ($patch->creates()) {
-            foreach ($this->related($key, $patch, false) as $later) {
+            foreach ($this->related($key, $patch, false, true) as $later) {
                 if ($later->creates()) {
                     return [TargetResult::NOT_COVERED, 'replaced by a later patch in this chain that creates the file again'];
                 }
@@ -565,12 +622,12 @@ final class Engine
     /**
      * @return FilePatch[] the same file's patches from the definitions this one is built on, or that are built on it
      */
-    private function related(string $key, FilePatch $patch, bool $earlier): array
+    private function related(string $key, FilePatch $patch, bool $earlier, bool $wantedOnly = false): array
     {
         $links = [];
 
         foreach ($this->slots[$this->project->rootFiles()->key($patch->path())] ?? [] as $slot) {
-            if ($slot['key'] === $key) {
+            if ($slot['key'] === $key || $wantedOnly && !isset($this->wanted[$slot['key']])) {
                 continue;
             }
 
@@ -613,13 +670,39 @@ final class Engine
     }
 
     /**
+     * What belongs on the file after a rebuild: the wanted patches, plus a dormant patch the ledger only found in
+     * place, since another tool put that copy there and taking it off would undo that tool's work.
+     *
+     * @param array{steps: array<int, array{fingerprint: string, adopted?: bool}>} $entry
+     *
      * @return array<int, array{key: string, file: FilePatch}>
      */
-    private function wantedOn(string $fileKey): array
+    private function keptOn(string $fileKey, array $entry): array
     {
-        return array_values(array_filter($this->slots[$fileKey] ?? [], function (array $slot): bool {
-            return isset($this->wanted[$slot['key']]);
+        $adopted = $this->recordedSteps($entry, true);
+
+        return array_values(array_filter($this->slots[$fileKey] ?? [], function (array $slot) use ($adopted): bool {
+            return isset($this->wanted[$slot['key']])
+                || isset($this->dormant[$slot['key']]) && in_array($slot['file']->fingerprint(), $adopted, true);
         }));
+    }
+
+    /**
+     * @param array{steps: array<int, array{fingerprint: string, adopted?: bool}>}|null $entry
+     *
+     * @return string[] fingerprints of the steps this plugin found in place ($adopted) or wrote itself
+     */
+    private function recordedSteps(?array $entry, bool $adopted): array
+    {
+        $fingerprints = [];
+
+        foreach ($entry['steps'] ?? [] as $step) {
+            if (($step['adopted'] ?? false) === $adopted) {
+                $fingerprints[] = $step['fingerprint'];
+            }
+        }
+
+        return $fingerprints;
     }
 
     /**
@@ -659,17 +742,32 @@ final class Engine
                 continue;
             }
 
+            $entry = $this->ledger->entry($path);
+            $own = $this->recordedSteps($entry, false);
+            $adopted = $this->recordedSteps($entry, true);
             $steps = [];
+
             foreach ($this->slots[$fileKey] ?? [] as $slot) {
-                if (!isset($this->wanted[$slot['key']])) {
+                $definition = $this->wanted[$slot['key']] ?? $this->dormant[$slot['key']] ?? null;
+                if ($definition === null) {
                     continue;
                 }
 
                 $index = array_search($slot['file'], $this->files[$slot['key']], true);
                 $state = $this->placementStates[$slot['key'] . '|' . $index . '|' . $path] ?? null;
+                $fingerprint = $slot['file']->fingerprint();
 
-                if ($state === TargetResult::PRESENT || $state === TargetResult::APPLIED) {
-                    $steps[] = ['patch' => $this->wanted[$slot['key']]->owner() . ' ' . $this->wanted[$slot['key']]->label(), 'file' => $slot['file']];
+                if (isset($this->wanted[$slot['key']])) {
+                    $keep = $state === TargetResult::PRESENT || $state === TargetResult::APPLIED;
+                    $isAdopted = $state === TargetResult::PRESENT && !in_array($fingerprint, $own, true);
+                } else {
+                    // A copy this plugin wrote but could not take off stays recorded, or the next run would call it someone else's.
+                    $keep = $state === TargetResult::CONFLICT || $state === TargetResult::LEFT && in_array($fingerprint, $adopted, true);
+                    $isAdopted = $state === TargetResult::LEFT;
+                }
+
+                if ($keep) {
+                    $steps[] = ['patch' => $definition->owner() . ' ' . $definition->label(), 'file' => $slot['file'], 'adopted' => $isAdopted];
                 }
             }
 

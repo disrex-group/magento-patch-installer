@@ -20,6 +20,7 @@ final class TextReport
     {
         $rows = [];
         $otherVersions = [];
+        $dormant = [];
 
         foreach ($summary->results() as $result) {
             if ($result->status() === PatchResult::OTHER_VERSION || $result->status() === PatchResult::UNREADABLE) {
@@ -27,8 +28,13 @@ final class TextReport
                 continue;
             }
 
+            if ($result->status() === PatchResult::NOT_ENABLED && self::untouched($result)) {
+                $dormant[] = $result;
+                continue;
+            }
+
             $badge = self::badge($result);
-            if ($problemsOnly && !$verbose && in_array($badge, ['ok', 'applied', 'reverted', 'skipped', 'n/a'], true)) {
+            if ($problemsOnly && !$verbose && in_array($badge, ['ok', 'applied', 'reverted', 'skipped', 'left', 'n/a'], true)) {
                 continue;
             }
 
@@ -57,6 +63,10 @@ final class TextReport
                 $lines[] = '      ' . self::escape($result->reason());
             }
 
+            if ($verbose && $definition->enableReason() !== null) {
+                $lines[] = '      enabled: ' . self::escape($definition->enableReason());
+            }
+
             foreach ($result->targets() as $target) {
                 if ($verbose || $target->isProblem() || $target->isOutstanding()) {
                     $lines[] = sprintf(
@@ -65,6 +75,16 @@ final class TextReport
                         self::escape($target->path()),
                         $target->reason() === null ? '' : "\n" . self::indent(self::escape($target->reason()), 18)
                     );
+                }
+            }
+        }
+
+        if ($dormant !== []) {
+            $lines[] = sprintf('  %d optional patch%s not enabled%s', count($dormant), count($dormant) === 1 ? '' : 'es', $verbose ? ':' : ' (-v lists them)');
+
+            if ($verbose) {
+                foreach ($dormant as $result) {
+                    $lines[] = '      ' . self::escape($result->definition()->label());
                 }
             }
         }
@@ -156,16 +176,23 @@ final class TextReport
             }
 
             $files = $engine->filePatches($definition);
-            $why = $definition->skipReason() ?? $engine->baseMismatch($definition) ?? (is_string($files) ? $files : null);
+            $why = $definition->skipReason()
+                ?? ($definition->isDormant() ? 'optional, not enabled' : null)
+                ?? $engine->baseMismatch($definition)
+                ?? (is_string($files) ? $files : null);
             $lines[] = sprintf(
                 '    %-14s %-24s %-32s %3s file%s  %s',
                 self::escape($definition->line() ?? 'any'),
                 self::escape($definition->id()),
-                self::escape((string) $definition->title()),
+                self::escape(trim($definition->title() . ($definition->isOptional() ? ' [optional]' : ''))),
                 is_array($files) ? (string) count($files) : '?',
                 is_array($files) && count($files) === 1 ? ' ' : 's',
                 $why === null ? '<info>applies here</info>' : ($verbose ? self::escape($why) : '')
             );
+
+            if ($verbose && $definition->enableReason() !== null) {
+                $lines[] = '        enabled: ' . self::escape($definition->enableReason());
+            }
 
             if ($verbose && $definition->description() !== null) {
                 $lines[] = '        ' . self::escape($definition->description());
@@ -179,7 +206,18 @@ final class TextReport
     {
         $definition = $result->definition();
 
-        return trim(($definition->title() ?? '') . ($definition->line() !== null ? ' [' . $definition->line() . ']' : ''));
+        return trim(($definition->title() ?? '') . ($definition->line() !== null ? ' [' . $definition->line() . ']' : '') . ($definition->isOptional() ? ' [optional]' : ''));
+    }
+
+    private static function untouched(PatchResult $result): bool
+    {
+        foreach ($result->targets() as $target) {
+            if (!in_array($target->state(), [TargetResult::ABSENT, TargetResult::NOT_COVERED], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static function badge(PatchResult $result): string
@@ -200,6 +238,10 @@ final class TextReport
 
         if ($result->status() === PatchResult::SKIPPED) {
             return in_array(TargetResult::REVERTED, $states, true) ? 'reverted' : 'skipped';
+        }
+
+        if ($result->status() === PatchResult::NOT_ENABLED) {
+            return in_array(TargetResult::REVERTED, $states, true) ? 'reverted' : (in_array(TargetResult::LEFT, $states, true) ? 'left' : 'off');
         }
 
         if (in_array(TargetResult::APPLIED, $states, true)) {

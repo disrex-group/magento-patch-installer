@@ -13,6 +13,7 @@ final class PatchResult
     public const SKIPPED = 'skipped';
     public const BLOCKED = 'blocked';
     public const UNREADABLE = 'unreadable';
+    public const NOT_ENABLED = 'not-enabled';
 
     /** @var Definition */
     private $definition;

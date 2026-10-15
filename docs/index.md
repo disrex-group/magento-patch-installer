@@ -15,6 +15,7 @@ It is built for Adobe's security patches. Since July 2026 Adobe ships those as i
 - **A re-issued patch replaces the old one.** When Adobe changes a patch after release day, the plugin swaps it on stores that already carry the first version, instead of stopping with a conflict.
 - **A patch goes on whole or not at all.** If one file of a patch will not take it, none of its files are written.
 - **Root files are patched in both places.** Magento copies about 120 files from `magento/magento2-base` to the project root; the plugin patches the served copy and the package copy.
+- **Optional patches stay off until a store asks for them.** A package can ship a patch that changes behaviour as `optional`; it only goes on in a project that enables it with a reason, and comes off again when that line goes.
 - **It fails the build.** A missing or conflicting patch makes `composer install` exit non-zero, so a pipeline stops before an unpatched store goes live.
 
 ## Where to start

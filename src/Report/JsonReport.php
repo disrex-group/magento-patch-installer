@@ -37,6 +37,8 @@ final class JsonReport
                 'applicable' => $result->status() === PatchResult::APPLIES,
                 'blocked' => $result->status() === PatchResult::BLOCKED,
                 'skipped' => $definition->skipReason(),
+                'optional' => $definition->isOptional(),
+                'enabled' => $definition->isOptional() ? $definition->enableReason() : null,
                 'reason' => $result->reason(),
                 'targets' => $targets,
             ];
@@ -71,9 +73,11 @@ final class JsonReport
                     return $labels[$key] ?? $key;
                 }, $definition->requires())),
                 'targets' => is_array($files) ? count($files) : 0,
-                'applicable' => $mismatch === null && $definition->skipReason() === null && is_array($files),
+                'applicable' => $mismatch === null && $definition->skipReason() === null && !$definition->isDormant() && is_array($files),
                 'skipped' => $definition->skipReason(),
-                'reason' => $definition->skipReason() ?? $mismatch ?? (is_string($files) ? $files : null),
+                'optional' => $definition->isOptional(),
+                'enabled' => $definition->isOptional() ? $definition->enableReason() : null,
+                'reason' => $definition->skipReason() ?? ($definition->isDormant() ? 'optional, not enabled' : null) ?? $mismatch ?? (is_string($files) ? $files : null),
             ];
         }
 

@@ -37,8 +37,12 @@ final class Runtime
     /** @var Advisor */
     private $advisor;
 
-    private function __construct(Settings $settings, Catalog $catalog, Project $project)
+    /** @var string */
+    private $rootName;
+
+    private function __construct(Settings $settings, Catalog $catalog, Project $project, string $rootName)
     {
+        $this->rootName = $rootName;
         $this->settings = $settings;
         $this->catalog = $catalog;
         $this->project = $project;
@@ -82,7 +86,7 @@ final class Runtime
         $settings = new Settings($root->getExtra());
         $catalog = (new DefinitionLoader())->load($settings, $root->getName(), $projectDir, $packages);
 
-        return new self($settings, $catalog, new Project($projectDir, $versions, $replacedBy, $rootMaps));
+        return new self($settings, $catalog, new Project($projectDir, $versions, $replacedBy, $rootMaps), $root->getName());
     }
 
     public function settings(): Settings
@@ -113,11 +117,11 @@ final class Runtime
     }
 
     /**
-     * @return array{_readme: string[], content-hash: string, patches: array<int, array<string, mixed>>}
+     * @return array{_readme: string[], content-hash: string, packages: array<string, string|null>, patches: array<int, array<string, mixed>>}
      */
     public function lock(): array
     {
-        return LockFile::build($this->catalog, $this->engine, $this->project);
+        return LockFile::build($this->catalog, $this->engine, $this->project, $this->rootName);
     }
 
     /**
@@ -140,6 +144,23 @@ final class Runtime
     public function advisories(): array
     {
         $advisories = $this->advisor->advise($this->project->versions(), $this->catalog->definitions());
+
+        $enabled = [];
+        foreach ($this->catalog->definitions() as $definition) {
+            if ($definition->enableReason() !== null) {
+                $enabled[$definition->owner() . ' ' . $definition->id()][] = $definition;
+            }
+        }
+
+        // One id can sit in several lines; enabling it is fine as long as one of them fits this install.
+        foreach ($enabled as $definitions) {
+            $mismatches = array_map([$this->engine, 'baseMismatch'], $definitions);
+
+            if (!in_array(null, $mismatches, true)) {
+                $advisories[] = new Advisory(Advisory::WARNING, sprintf('%s is enabled, but does not apply to this install: %s.', $definitions[0]->id(), implode('; ', $mismatches)));
+            }
+        }
+
         $stale = $this->staleLockWarning();
 
         return $stale === null ? $advisories : array_merge($advisories, [new Advisory(Advisory::WARNING, $stale)]);

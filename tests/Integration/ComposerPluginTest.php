@@ -30,7 +30,9 @@ final class ComposerPluginTest extends TestCase
         self::assertSame(0, $code, $output);
         self::assertSame(ComposerProject::FIXED, $project->read(ComposerProject::FILE));
         $lock = json_decode((string) $project->read(LockFile::NAME), true);
+        self::assertSame(['disrex/test-patches' => '1.0.0'], $lock['packages']);
         self::assertSame('FIX-1', $lock['patches'][0]['id']);
+        self::assertArrayNotHasKey('version', $lock['patches'][0]);
         self::assertSame([ComposerProject::FILE], $lock['patches'][0]['files']);
     }
 
@@ -45,6 +47,7 @@ final class ComposerPluginTest extends TestCase
         self::assertSame(0, $code, $output);
         self::assertStringContainsString('does not match', $output);
         self::assertSame('{"content-hash": "outdated", "patches": []}', $project->read(LockFile::NAME));
+        self::assertStringContainsString('does not match', $project->composer('magento-patches:verify')[1]);
         self::assertSame(1, $project->composer('magento-patches:lock', '--check')[0]);
         self::assertSame(0, $project->composer('magento-patches:lock')[0]);
         self::assertSame(0, $project->composer('magento-patches:lock', '--check')[0]);
